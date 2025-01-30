@@ -95,14 +95,14 @@ def main():
     
     parser = argparse.ArgumentParser(description='Process DEM and Shapefile paths.')
     parser.add_argument('--hillshade_dem_path', type=str, required=True, help='Path to the hillshade DEM file')
-    parser.add_argument('--mask_shapefile_path', type=str, required=True, help='Path to the mask shapefile')
+    parser.add_argument('--mask_shapefile_path', type=str, required=True, help='Path to the mask shapefile that outlines the area of comparison')
     parser.add_argument('--output_path_print', type=str, required=True, help='Output path for results')
-    parser.add_argument('--prefix_dem1', type=str, required=True, help='First year identifier')
-    parser.add_argument('--prefix_dem2', type=str, required=True, help='Second year identifier')
-    parser.add_argument('--profile_shapefile_path', type=str, default="", help='Path to the profile shapefile')
+    parser.add_argument('--prefix_dem1', type=str, required=True, help='First year identifier to be added to the plot caption')
+    parser.add_argument('--prefix_dem2', type=str, required=True, help='Second year identifier to be added to the plot caption')
+    parser.add_argument('--profile_shapefile_path', type=str, default="", help='In case one will investigate the elevation change along a profile, provide the path to the profile as shapefile (polyline)')
     parser.add_argument('--dem1_path', type=str, required=True, help='Path to the first DEM file')
     parser.add_argument('--dem2_path', type=str, required=True, help='Path to the second DEM file')
-    parser.add_argument('--glacier_outline_shape', type=str, required=True, help='Path to the glacier outline shapefile')
+    parser.add_argument('--outline_shape', type=str, required=True, help='In case on will overlay the graphic with outlines, e.g. from a glacier, provide the path to the outline shapefile')
     args = parser.parse_args()
 
     # Load DEMs and shapefile
@@ -114,7 +114,7 @@ def main():
     profile_shapefile_path = args.profile_shapefile_path
     dem1_path = args.dem1_path
     dem2_path = args.dem2_path
-    glacier_outline_shape = args.glacier_outline_shape
+    outline_shape = args.outline_shape
 
     # Ensure common extent for DEMs
     with rasterio.open(dem2_path) as src, rasterio.open(dem1_path) as src_to_crop:
@@ -176,8 +176,8 @@ def main():
     if profile_shapefile_path and polyline.crs != masked_dem1_transform:
         polyline = polyline.to_crs(dem1_crs)
 
-    if glacier_outline_shape:
-        glacier_outline_loaded = gpd.read_file(glacier_outline_shape)
+    if outline_shape:
+        glacier_outline_loaded = gpd.read_file(outline_shape)
         if glacier_outline_loaded.crs != masked_dem1_transform:
             glacier_outline_loaded = glacier_outline_loaded.to_crs(dem1_crs)
 
@@ -208,7 +208,7 @@ def main():
             plt.plot(x, y, color='black', linewidth=1, linestyle='dashed', label='Polyline')
 
     # Add glacier outline
-    if glacier_outline_shape:
+    if outline_shape:
         for _, row in glacier_outline_loaded.iterrows():
             if row.geometry.geom_type == 'Polygon':
                 x, y = row.geometry.exterior.xy
