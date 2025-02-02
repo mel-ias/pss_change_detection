@@ -1,4 +1,5 @@
 import argparse
+import os
 import numpy as np
 import rasterio
 from rasterio.warp import reproject, Resampling
@@ -7,7 +8,6 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from rasterio import features
-from rasterio.mask import mask
 from shapely.geometry import LineString
 from mpl_toolkits import axes_grid1
 
@@ -92,7 +92,6 @@ def add_colorbar(im, aspect=20, pad_fraction=0.5, **kwargs):
 
 # Main function to process DEM and Shapefile paths
 def main():
-    
     parser = argparse.ArgumentParser(description='Process DEM and Shapefile paths.')
     parser.add_argument('--hillshade_dem_path', type=str, required=True, help='Path to the hillshade DEM file')
     parser.add_argument('--mask_shapefile_path', type=str, required=True, help='Path to the mask shapefile that outlines the area of comparison')
@@ -102,8 +101,14 @@ def main():
     parser.add_argument('--profile_shapefile_path', type=str, default="", help='In case one will investigate the elevation change along a profile, provide the path to the profile as shapefile (polyline)')
     parser.add_argument('--dem1_path', type=str, required=True, help='Path to the first DEM file')
     parser.add_argument('--dem2_path', type=str, required=True, help='Path to the second DEM file')
-    parser.add_argument('--outline_shape', type=str, required=True, help='In case on will overlay the graphic with outlines, e.g. from a glacier, provide the path to the outline shapefile')
+    parser.add_argument('--outline_shape', type=str, default = "", help='In case on will overlay the graphic with outlines, e.g. from a glacier, provide the path to the outline shapefile')
+    parser.add_argument('--diff_min', type=float, default=-150, help='Minimum value for the DoD color scale')
+    parser.add_argument('--diff_max', type=float, default=150, help='Maximum value for the DoD color scale')
     args = parser.parse_args()
+
+    # Ensure the output directory exists
+    if not os.path.exists(os.path.dirname(args.output_path_print)):
+        os.makedirs(os.path.dirname(args.output_path_print))
 
     # Load DEMs and shapefile
     hillshade_dem_path = args.hillshade_dem_path
@@ -115,6 +120,8 @@ def main():
     dem1_path = args.dem1_path
     dem2_path = args.dem2_path
     outline_shape = args.outline_shape
+    diff_min = args.diff_min
+    diff_max = args.diff_max
 
     # Ensure common extent for DEMs
     with rasterio.open(dem2_path) as src, rasterio.open(dem1_path) as src_to_crop:
@@ -155,16 +162,17 @@ def main():
     if dem2_nodata is not None:
         dem2[dem2 == dem2_nodata] = np.nan
 
-    # Apply mask to the raster
+    # Apply mask to the rasters
     with rasterio.open(dem1_path) as src1:
         masked_dem1, masked_dem1_transform = apply_mask(src1, dem1_transform, mask_shapefile, dem1_nodata)
+    with rasterio.open(dem2_path) as src2:
+        masked_dem2, masked_dem2_transform = apply_mask(src2, dem2_transform, mask_shapefile, dem2_nodata)
 
     # Resample DEM2 to the resolution of DEM1
-    dem2_resampled = resample_raster(dem2, dem2_transform, dem2_crs, masked_dem1.shape, masked_dem1_transform, dem1_crs, dem2_nodata)
+    dem2_resampled = resample_raster(masked_dem2, masked_dem2_transform, dem2_crs, masked_dem1.shape, masked_dem1_transform, dem1_crs, dem2_nodata)
 
-    # Calculate the difference
-    dem_diff = dem2_resampled - masked_dem1
-    # dem_diff, percent_filtered = removeOutliers(dem_diff, outlierConstant=50) # the higher the constant, the less values are filtered 
+    # Calculate the difference, ensuring no calculation where either raster has NoData values
+    dem_diff = np.where(np.isnan(masked_dem1) | np.isnan(dem2_resampled), np.nan, dem2_resampled - masked_dem1)
 
     # Load DEM for hillshade calculation
     hillshade_dem, hillshade_transform, hillshade_crs, hillshade_profile, hillshade_nodata = load_raster(hillshade_dem_path)
@@ -182,7 +190,7 @@ def main():
             glacier_outline_loaded = glacier_outline_loaded.to_crs(dem1_crs)
 
     # Mask areas outside dem_diff with NaN
-    dem_diff_masked = np.where(np.isnan(dem_diff), np.nan, dem_diff)
+    dem_diff_masked = np.where(np.isnan(masked_dem1) | np.isnan(dem2_resampled), np.nan, dem_diff)
 
     # Visualization: Difference and Hillshade
     fig = plt.figure(figsize=(10, 10))
@@ -223,7 +231,7 @@ def main():
     ax.set_title('DoD ' + prefix_dem1 + '/' + prefix_dem2)
     cbar = add_colorbar(diff_img)
     cbar.set_label('Elevation Change (m)', rotation=90, labelpad=15)
-    diff_img.set_clim(-50, 50)
+    diff_img.set_clim(diff_min, diff_max)
     ax.set_xlim(masked_dem1_transform[2], masked_dem1_transform[2] + masked_dem1_transform[0] * masked_dem1.shape[1])
     ax.set_ylim(masked_dem1_transform[5] + masked_dem1_transform[4] * masked_dem1.shape[0], masked_dem1_transform[5])
 
